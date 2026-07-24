@@ -7,7 +7,8 @@ def test_console_script_and_license_metadata():
     data = tomllib.loads(Path("pyproject.toml").read_text())
     project = data["project"]
     assert project["scripts"]["trunkline"] == "trunkline.cli:main"
-    assert project["license"] == {"file": "LICENSE"}
+    assert project["license"] == "MIT"
+    assert project["license-files"] == ["LICENSE"]
     assert project["readme"] == "README.md"
 
 

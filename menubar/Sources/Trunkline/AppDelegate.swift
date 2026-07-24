@@ -2,6 +2,7 @@ import AppKit
 import ServiceManagement
 import TrunklineKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statePath = NSHomeDirectory() + "/.trunkline/state.json"
     private let stateDir = NSHomeDirectory() + "/.trunkline"
@@ -129,11 +130,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func fetchUsage(then completion: @escaping () -> Void) {
         lastUsageAttempt = Date().timeIntervalSince1970
         usageInFlight = true
-        cli.run(["usage", "--json"], lane: .query, timeout: 40) { [weak self] r in
-            DispatchQueue.main.async {
+        cli.run(["usage", "--json"], lane: .query, timeout: 40) { [weak self] result in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.usageInFlight = false
-                if let report = UsageReport.decode(Data(r.stdout.utf8)) { self.usageReport = report }
+                if let report = UsageReport.decode(Data(result.stdout.utf8)) {
+                    self.usageReport = report
+                }
                 completion()
             }
         }
@@ -169,12 +172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func runAction(_ sender: NSMenuItem) {
         guard let args = sender.representedObject as? [String] else { return }
-        cli.run(args, lane: .action, timeout: 30) { [weak self] r in
-            DispatchQueue.main.async {
-                if r.rc != 0 {
+        cli.run(args, lane: .action, timeout: 30) { [weak self] result in
+            Task { @MainActor [weak self] in
+                if result.rc != 0 {
                     let alert = NSAlert()
                     alert.messageText = "trunkline \(args.joined(separator: " ")) 실패"
-                    alert.informativeText = r.stderr.split(separator: "\n").first.map(String.init) ?? "rc=\(r.rc)"
+                    alert.informativeText =
+                        result.stderr.split(separator: "\n").first.map(String.init)
+                        ?? "rc=\(result.rc)"
                     alert.runModal()
                 }
                 self?.reload()

@@ -39,8 +39,12 @@ for pattern in "${patterns[@]}"; do
   fi
 done
 
-grep -Fq 'license = { file = "LICENSE" }' pyproject.toml || {
+grep -Fq 'license = "MIT"' pyproject.toml || {
   echo "public audit: MIT license metadata missing" >&2
+  exit 1
+}
+grep -Fq 'license-files = ["LICENSE"]' pyproject.toml || {
+  echo "public audit: license file metadata missing" >&2
   exit 1
 }
 grep -Fq 'trunkline = "trunkline.cli:main"' pyproject.toml || {

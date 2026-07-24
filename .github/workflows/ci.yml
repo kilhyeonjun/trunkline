@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install . pytest build
+      - run: python -m pytest -q
+      - run: python -m build --wheel
+      - run: python -m zipfile -l dist/trunkline-0.1.0-py3-none-any.whl
+
+  public-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash scripts/audit-public-tree.sh
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test Swift package
+        working-directory: menubar
+        run: swift test
+      - name: Reject AppDelegate concurrency warnings
+        working-directory: menubar
+        run: bash Tests/verify_release_warnings.sh
+      - name: Build release app
+        working-directory: menubar
+        run: bash Scripts/package_app.sh
