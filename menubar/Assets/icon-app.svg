@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1024">
+      <stop offset="0" stop-color="#23262E"/>
+      <stop offset="1" stop-color="#16181D"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS squircle (rx ~22.4%) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="229" fill="url(#bg)"/>
+
+  <!-- top gauge: track + teal fill 65% (thick bar = session window) -->
+  <rect x="192" y="380" width="640" height="96" rx="48" fill="#3A3F4A"/>
+  <rect x="192" y="380" width="416" height="96" rx="48" fill="#2FD3C6"/>
+
+  <!-- bottom gauge: track + coral fill 30% (thin bar = weekly window / 2nd provider) -->
+  <rect x="192" y="548" width="640" height="64" rx="32" fill="#3A3F4A"/>
+  <rect x="192" y="548" width="192" height="64" rx="32" fill="#D97757"/>
+
+  <!-- destinationOut punch gap: background-colored band through both bars -->
+  <rect x="500" y="340" width="56" height="312" fill="url(#bg)"/>
+
+  <!-- pace tick: one neutral white stripe connecting both lines (trunk-line metaphor) -->
+  <rect x="518" y="352" width="20" height="288" rx="10" fill="#F5F6F8"/>
+</svg>

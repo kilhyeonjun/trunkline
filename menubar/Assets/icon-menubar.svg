@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Template glyph: single color, alpha-only. Render at 16-18pt with isTemplate=true. 1pt = 64u -->
+  <!-- 3-shape glyph, vertically centered on the 16pt canvas (bottom capsule removed for clarity at menu-bar size) -->
+  <!-- capsule outline: gauge track (13 x 5pt, 1.5pt stroke) -->
+  <rect x="96" y="352" width="832" height="320" rx="160" fill="none" stroke="#000000" stroke-width="96"/>
+  <!-- fill ~60%, ends short of the tick = punch gap -->
+  <rect x="176" y="432" width="360" height="160" rx="80" fill="#000000"/>
+  <!-- pace tick: protrudes 1pt above/below the capsule -->
+  <rect x="600" y="288" width="96" height="448" rx="48" fill="#000000"/>
+</svg>

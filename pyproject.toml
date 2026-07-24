@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trunkline"
+version = "0.1.0"
+description = "Local-first multi-account manager for AI coding tools"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Kilhyeonjun" }]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3",
+]
+
+[project.scripts]
+trunkline = "trunkline.cli:main"
+
+[tool.setuptools]
+packages = ["trunkline"]
+
+[tool.setuptools.exclude-package-data]
+"*" = [".superpowers/*", "telegram-plugin/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
