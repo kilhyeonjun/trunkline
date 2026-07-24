@@ -30,6 +30,8 @@ def test_ci_workflow_has_release_validation_contract():
     assert "bash Scripts/package_app.sh" in workflow
     assert "python -m build --wheel" in workflow
     assert "upload-artifact" not in workflow
+    python_job = workflow.split("  python:", 1)[1].split("  public-audit:", 1)[0]
+    assert "runs-on: macos-latest" in python_job
 
 
 def test_v010_release_docs_name_exact_asset_and_limits():
