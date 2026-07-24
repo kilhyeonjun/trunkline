@@ -46,3 +46,13 @@ def test_v010_release_docs_name_exact_asset_and_limits():
     assert "ad-hoc" in notes
     assert "notarized" in notes
     assert "SHA-256" in notes
+
+
+def test_packaging_uses_current_spdx_license_metadata():
+    root = Path(__file__).resolve().parents[1]
+    pyproject = (root / "pyproject.toml").read_text()
+
+    assert 'license = "MIT"' in pyproject
+    assert 'license-files = ["LICENSE"]' in pyproject
+    assert 'license = { file = "LICENSE" }' not in pyproject
+    assert "License :: OSI Approved :: MIT License" not in pyproject
