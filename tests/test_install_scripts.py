@@ -24,7 +24,17 @@ def test_install_renders_resolved_cli_without_pythonpath(tmp_path):
     cli.parent.mkdir()
     cli.write_text("#!/bin/sh\nexit 0\n")
     cli.chmod(0o755)
-    result = run_script("install.sh", tmp_path, env={"TRUNKLINE_CLI": str(cli)})
+    plutil = cli.parent / "plutil"
+    plutil.write_text("#!/bin/sh\nexit 0\n")
+    plutil.chmod(0o755)
+    result = run_script(
+        "install.sh",
+        tmp_path,
+        env={
+            "PATH": f"{cli.parent}:{os.environ['PATH']}",
+            "TRUNKLINE_CLI": str(cli),
+        },
+    )
     assert result.returncode == 0, result.stderr
     plist = plistlib.loads(
         (

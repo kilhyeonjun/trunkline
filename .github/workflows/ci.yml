@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   python:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
@@ -38,6 +38,9 @@ jobs:
       - name: Test Swift package
         working-directory: menubar
         run: swift test
+      - name: Reject AppDelegate concurrency warnings
+        working-directory: menubar
+        run: bash Tests/verify_release_warnings.sh
       - name: Build release app
         working-directory: menubar
         run: bash Scripts/package_app.sh
