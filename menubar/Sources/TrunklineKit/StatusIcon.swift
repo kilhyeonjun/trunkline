@@ -9,6 +9,14 @@ public func statusTitle(state: TrunklineState?, now: Double, wakeGraceUntil: Dou
     case .running: break
     }
     let (active, lastEvent) = (s.provider.active, s.provider.lastEvent)
+    if let accountHealth = s.provider.health(for: active) {
+        switch AccountHealthSeverity(state: accountHealth.state) {
+        case .severe: return "⚠︎!"
+        case .transient: return "⏳"
+        case .unknown: return "⚠︎?"
+        case .normal: break
+        }
+    }
     let label = active.map { String($0.prefix(1)).uppercased() } ?? "?"
     let recentFallback = lastEvent.map { $0.type == "fallback" && now - $0.at < 600 } ?? false
     let prefix = recentFallback ? "⇄" : ""
@@ -28,6 +36,9 @@ public func statusAccessibilityLabel(state: TrunklineState?, now: Double, wakeGr
     case .running: break
     }
     let active = s.provider.active ?? "없음"
+    if let accountHealth = s.provider.health(for: s.provider.active) {
+        return "Trunkline — 활성 \(active), 계정 상태 \(accountHealthText(accountHealth.state))"
+    }
     let claudeSuffix = (s.claude?.loginWarning != nil) ? ", Claude 로그인 만료 임박" : ""
     if let pct = s.observedFresh(now: now) {
         return "Trunkline — 활성 \(active), 잔여 \(Int((100 - pct).rounded()))%\(claudeSuffix)"

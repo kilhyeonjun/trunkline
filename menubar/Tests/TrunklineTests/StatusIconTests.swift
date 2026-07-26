@@ -77,6 +77,21 @@ final class StatusIconTests: XCTestCase {
         XCTAssertEqual(title("not json", now: 1000), "⚠︎?")
     }
 
+    func testAccountHealthIconsHaveDeterministicSeverity() {
+        func state(_ value: String) -> String {
+            """
+            {"version":2,"updated_at":1000,"providers":{"codex":{"active":"personal","mode":"auto",
+            "accounts":[{"label":"personal","snapshot_ok":true}],
+            "account_health":[{"label":"personal","model":"m","state":"\(value)","observed_at":1000}]}}}
+            """
+        }
+        for severe in ["usage_exhausted", "entitlement_unavailable", "auth_stale"] {
+            XCTAssertEqual(title(state(severe), now: 1000), "⚠︎!")
+        }
+        XCTAssertEqual(title(state("temporarily_throttled"), now: 1000), "⏳")
+        XCTAssertEqual(title(state("future_state"), now: 1000), "⚠︎?")
+    }
+
     // T — 상태 버튼 VoiceOver 레이블: 이니셜·%·⚠︎ 축약 대신 풀어 쓴 문장.
     func testAccessibilityLabelRunningStateSpellsOutActiveAndRemainPercent() {
         let json = """
