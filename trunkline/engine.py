@@ -8,6 +8,15 @@ from dataclasses import dataclass
 SHORT_WINDOW_MAX_MINUTES = 1440   # window_minutes < 1440 → 단기(5h류) 창
 COOLDOWN_S = 120.0
 RETURN_GRACE_S = 60.0
+ENTITLEMENT_FRAGMENT = "model is not supported when using codex with a chatgpt account"
+HEALTH_STATES = {
+    "healthy",
+    "usage_exhausted",
+    "entitlement_unavailable",
+    "auth_stale",
+    "temporarily_throttled",
+    "unknown",
+}
 
 
 @dataclass(frozen=True)
@@ -19,6 +28,16 @@ class RateLimitEvent:
 
 
 @dataclass(frozen=True)
+class AccountHealthEvent:
+    label: str
+    model: str
+    state: str
+    observed_at: int
+    reset_at: int | None = None
+    error_class: str | None = None
+
+
+@dataclass(frozen=True)
 class Decision:
     kind: str            # "none" | "fallback" | "return"
     target: str | None
@@ -26,6 +45,50 @@ class Decision:
 
 
 NONE = Decision(kind="none", target=None, reason="")
+
+
+def parse_account_health(line: str) -> list[AccountHealthEvent]:
+    try:
+        obj = json.loads(line)
+    except Exception:
+        return []
+    if not isinstance(obj, dict) or obj.get("type") != "account_health":
+        return []
+
+    label = obj.get("label")
+    model = obj.get("model")
+    observed_at = obj.get("observed_at")
+    if (
+        not isinstance(label, str)
+        or not isinstance(model, str)
+        or isinstance(observed_at, bool)
+        or not isinstance(observed_at, int)
+    ):
+        return []
+    reset_at = obj.get("reset_at")
+    error_class = obj.get("error_class")
+    if (
+        reset_at is not None
+        and (isinstance(reset_at, bool) or not isinstance(reset_at, int))
+        or (error_class is not None and not isinstance(error_class, str))
+    ):
+        return []
+
+    status = obj.get("status")
+    message = obj.get("message")
+    is_entitlement_unavailable = (
+        status == 400
+        and isinstance(message, str)
+        and ENTITLEMENT_FRAGMENT in " ".join(message.casefold().split())
+    )
+    return [AccountHealthEvent(
+        label=label,
+        model=model,
+        state="entitlement_unavailable" if is_entitlement_unavailable else "unknown",
+        observed_at=observed_at,
+        reset_at=reset_at,
+        error_class=error_class,
+    )]
 
 
 def parse_token_count(line: str) -> list[RateLimitEvent]:
@@ -83,6 +146,28 @@ class AutoSwitchEngine:
             return NONE  # 마지막 계정 — 폴백 대상 없음
         return Decision(kind="fallback", target=self.priority[idx + 1],
                         reason=f"{active} exhausted")
+
+    def on_unavailable(self, active: str, model: str, now: float,
+                       health: dict[tuple[str, str], str]) -> Decision:
+        if not active or not model:
+            return NONE
+        if self._in_cooldown(now):
+            return NONE
+        if health.get((active, model)) != "entitlement_unavailable":
+            return NONE
+        try:
+            idx = self.priority.index(active)
+        except ValueError:
+            return NONE
+        for candidate in self.priority[idx + 1:]:
+            if health.get((candidate, model)) == "entitlement_unavailable":
+                continue
+            return Decision(
+                kind="fallback",
+                target=candidate,
+                reason=f"{active} unavailable for {model}",
+            )
+        return NONE
 
     def on_tick(self, active: str, now: float, primary_label: str,
                 primary_reset_at: float | None, auto_switched: bool) -> Decision:
