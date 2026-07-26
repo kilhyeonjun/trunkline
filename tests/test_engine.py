@@ -130,6 +130,18 @@ def test_account_health_requires_nonempty_provider(provider):
     assert parse_account_health(json.dumps(payload)) == []
 
 
+@pytest.mark.parametrize("field", ["provider", "label", "model"])
+@pytest.mark.parametrize("value", ["", "   ", "\t"])
+def test_account_health_rejects_blank_scope_fields(field, value):
+    payload = {
+        "type": "account_health", "provider": "codex", "label": "personal",
+        "model": "gpt-5.6-sol", "observed_at": 1,
+    }
+    payload[field] = value
+
+    assert parse_account_health(json.dumps(payload)) == []
+
+
 def test_unavailable_health_is_scoped_by_provider_label_and_model():
     engine = AutoSwitchEngine(priority=["personal", "company"])
 

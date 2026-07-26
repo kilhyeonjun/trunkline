@@ -133,6 +133,28 @@ def test_probe_normalizes_public_outcomes_without_raw_output(monkeypatch, comple
     assert not hasattr(result, "stdout")
 
 
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "expected_state", "expected_error"),
+    [
+        ('{"type":"error","message":"The model is not supported when using Codex with a ChatGPT account."}\n', "",
+         "entitlement_unavailable", "model_unsupported"),
+        ('{"type":"turn.failed","error":{"message":"The model is not supported when using Codex with a ChatGPT account."}}\n', "",
+         "entitlement_unavailable", "model_unsupported"),
+        ('{"type":"error","message":"HTTP 503"}\n', "", "unknown", "http_503"),
+        ("not-json\n", "plain failure", "unknown", "codex_exit"),
+    ],
+)
+def test_nonzero_probe_parses_jsonl_failure_before_plain_fallback(monkeypatch, stdout, stderr,
+                                                                  expected_state, expected_error):
+    completed = subprocess.CompletedProcess([], 1, stdout=stdout, stderr=stderr)
+    monkeypatch.setattr("trunkline.providerio.subprocess.run", lambda *_args, **_kwargs: completed)
+
+    result = probe_codex_health(codex_path="codex", model="gpt-5.6-sol", timeout=3)
+
+    assert (result.state, result.error_class) == (expected_state, expected_error)
+    assert not hasattr(result, "stdout")
+
+
 def test_probe_timeout_is_unknown_without_raw_output(monkeypatch):
     def timeout(*_args, **_kwargs):
         raise subprocess.TimeoutExpired("codex", 3, output="secret-token", stderr="email@example.com")

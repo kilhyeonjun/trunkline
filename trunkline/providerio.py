@@ -57,8 +57,11 @@ def _is_entitlement_text(texts: list[str]) -> bool:
 
 
 def _probe_failure(value: object) -> CodexHealthProbe:
-    if _is_entitlement_text(_public_strings(value)):
+    texts = _public_strings(value)
+    if _is_entitlement_text(texts):
         return CodexHealthProbe(state="entitlement_unavailable", error_class="model_unsupported")
+    if any(_HTTP_503.search(text) for text in texts):
+        return CodexHealthProbe(state="unknown", error_class="http_503")
     return CodexHealthProbe(state="unknown", error_class="codex_error")
 
 
@@ -84,6 +87,21 @@ def _jsonl_probe_outcome(stdout: object) -> CodexHealthProbe:
     return CodexHealthProbe(state="unknown", error_class="codex_incomplete")
 
 
+def _jsonl_failure_outcome(stdout: object) -> CodexHealthProbe | None:
+    if not isinstance(stdout, str):
+        return None
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(event, dict) and event.get("type") in {"error", "turn.failed"}:
+            return _probe_failure({key: value for key, value in event.items() if key != "type"})
+    return None
+
+
 def probe_codex_health(*, codex_path: str, model: str, timeout: float) -> CodexHealthProbe:
     command = [
         codex_path, "exec", "--ephemeral", "--json", "--model", model,
@@ -97,6 +115,9 @@ def probe_codex_health(*, codex_path: str, model: str, timeout: float) -> CodexH
         return CodexHealthProbe(state="unknown", error_class="codex_unavailable")
     if completed.returncode == 0:
         return _jsonl_probe_outcome(completed.stdout)
+    jsonl_failure = _jsonl_failure_outcome(completed.stdout)
+    if jsonl_failure is not None:
+        return jsonl_failure
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if isinstance(part, str))
     if _is_entitlement_text([output]):
         return CodexHealthProbe(state="entitlement_unavailable", error_class="model_unsupported")

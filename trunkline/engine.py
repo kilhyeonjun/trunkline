@@ -67,9 +67,11 @@ def parse_account_health(line: str) -> list[AccountHealthEvent]:
     observed_at = obj.get("observed_at")
     if (
         not isinstance(provider, str)
-        or not provider
+        or not provider.strip()
         or not isinstance(label, str)
+        or not label.strip()
         or not isinstance(model, str)
+        or not model.strip()
         or isinstance(observed_at, bool)
         or not isinstance(observed_at, int)
     ):
