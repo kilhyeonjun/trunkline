@@ -40,12 +40,26 @@ Initialize two named snapshots after backing up your current credentials:
 ```bash
 trunkline init --priority personal,company
 trunkline status
-trunkline pin personal
+trunkline lock personal
 trunkline auto
 ```
 
-`pin LABEL` keeps the selected account active. `auto` enables fallback and
-return decisions based on locally observed usage events.
+`lock LABEL` keeps the selected account active. `auto` enables fallback and
+return decisions based on locally observed usage events. A provider-native
+Codex pin control is unsupported; use Trunkline's local `lock LABEL` instead.
+
+Inspect the redacted local health history without contacting Codex:
+
+```bash
+trunkline health
+```
+
+An explicit probe can consume paid usage. It runs one read-only, ephemeral
+Codex request for the named model and stores only a normalized health outcome:
+
+```bash
+trunkline health --probe --model gpt-5.6-sol --timeout 10
+```
 
 ## Install the menu bar app and daemon
 
@@ -79,9 +93,10 @@ bash scripts/uninstall.sh --remove-data
 - Usage readers send an existing access token only to the provider's usage
   endpoint; they do not refresh, rotate, print, or persist returned tokens.
 - The daemon watches local rollout logs and state. It does not add a token
-  refresh path.
-- The menu bar app only permits `status`, `usage`, `switch`, `pin`, `auto`,
-  and `lock`.
+  refresh path or run health probes.
+- `health --probe` is explicit because it may use paid entitlement; probe output,
+  tokens, email addresses, and account IDs are never printed or persisted.
+- The menu bar app only permits `status`, `usage`, `switch`, `auto`, and `lock`.
 
 Read the implementation and tests before trusting Trunkline with important
 accounts. See [SECURITY.md](SECURITY.md) for vulnerability reporting.

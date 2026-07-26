@@ -1,10 +1,11 @@
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from trunkline.providerio import CodexConfigIO
+from trunkline.providerio import CodexConfigIO, probe_codex_health
 
 AUTH = json.dumps({"tokens": {"account_id": "acct-1"}}).encode()
 
@@ -64,3 +65,55 @@ def test_live_identity(codex_home: Path):
 def test_live_identity_missing_file(codex_home: Path):
     io = CodexConfigIO(codex_home)
     assert io.live_identity() is None
+
+
+def test_probe_uses_one_read_only_ephemeral_json_codex_exec(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout='{"type":"completed"}\n', stderr="")
+
+    monkeypatch.setattr("trunkline.providerio.subprocess.run", run)
+
+    result = probe_codex_health(codex_path="codex", model="gpt-5.6-sol", timeout=3)
+
+    assert result.state == "healthy"
+    assert len(calls) == 1
+    command, kwargs = calls[0]
+    assert command[:2] == ["codex", "exec"]
+    assert "--ephemeral" in command
+    assert "--json" in command
+    assert command[command.index("--model") + 1] == "gpt-5.6-sol"
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert kwargs["timeout"] == 3
+    assert "health check" in command[-1].casefold()
+
+
+@pytest.mark.parametrize(
+    ("completed", "expected_state", "expected_error"),
+    [
+        (subprocess.CompletedProcess([], 1, stdout="HTTP 503", stderr=""), "unknown", "http_503"),
+        (subprocess.CompletedProcess([], 1, stdout="The model is not supported when using Codex with a ChatGPT account.", stderr=""), "entitlement_unavailable", "model_unsupported"),
+    ],
+)
+def test_probe_normalizes_public_outcomes_without_raw_output(monkeypatch, completed,
+                                                              expected_state, expected_error):
+    monkeypatch.setattr("trunkline.providerio.subprocess.run", lambda *_args, **_kwargs: completed)
+
+    result = probe_codex_health(codex_path="codex", model="gpt-5.6-sol", timeout=3)
+
+    assert result.state == expected_state
+    assert result.error_class == expected_error
+    assert not hasattr(result, "stdout")
+
+
+def test_probe_timeout_is_unknown_without_raw_output(monkeypatch):
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("codex", 3, output="secret-token", stderr="email@example.com")
+
+    monkeypatch.setattr("trunkline.providerio.subprocess.run", timeout)
+
+    result = probe_codex_health(codex_path="codex", model="gpt-5.6-sol", timeout=3)
+
+    assert (result.state, result.error_class) == ("unknown", "timeout")
