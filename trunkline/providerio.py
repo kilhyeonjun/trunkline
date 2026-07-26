@@ -42,6 +42,48 @@ class CodexHealthProbe:
     error_class: str | None
 
 
+def _public_strings(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _public_strings(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in _public_strings(item)]
+    return []
+
+
+def _is_entitlement_text(texts: list[str]) -> bool:
+    return any(_ENTITLEMENT_MESSAGE.fullmatch(" ".join(text.split())) for text in texts)
+
+
+def _probe_failure(value: object) -> CodexHealthProbe:
+    if _is_entitlement_text(_public_strings(value)):
+        return CodexHealthProbe(state="entitlement_unavailable", error_class="model_unsupported")
+    return CodexHealthProbe(state="unknown", error_class="codex_error")
+
+
+def _jsonl_probe_outcome(stdout: object) -> CodexHealthProbe:
+    if not isinstance(stdout, str):
+        return CodexHealthProbe(state="unknown", error_class="codex_incomplete")
+    completed = False
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return CodexHealthProbe(state="unknown", error_class="codex_incomplete")
+        if not isinstance(event, dict):
+            return CodexHealthProbe(state="unknown", error_class="codex_incomplete")
+        if event.get("type") in {"error", "turn.failed"}:
+            return _probe_failure({key: value for key, value in event.items() if key != "type"})
+        if event.get("type") == "turn.completed":
+            completed = True
+    if completed:
+        return CodexHealthProbe(state="healthy", error_class=None)
+    return CodexHealthProbe(state="unknown", error_class="codex_incomplete")
+
+
 def probe_codex_health(*, codex_path: str, model: str, timeout: float) -> CodexHealthProbe:
     command = [
         codex_path, "exec", "--ephemeral", "--json", "--model", model,
@@ -54,12 +96,11 @@ def probe_codex_health(*, codex_path: str, model: str, timeout: float) -> CodexH
     except OSError:
         return CodexHealthProbe(state="unknown", error_class="codex_unavailable")
     if completed.returncode == 0:
-        return CodexHealthProbe(state="healthy", error_class=None)
+        return _jsonl_probe_outcome(completed.stdout)
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if isinstance(part, str))
-    normalized = " ".join(output.split())
-    if _ENTITLEMENT_MESSAGE.search(normalized):
+    if _is_entitlement_text([output]):
         return CodexHealthProbe(state="entitlement_unavailable", error_class="model_unsupported")
-    if _HTTP_503.search(normalized):
+    if _HTTP_503.search(output):
         return CodexHealthProbe(state="unknown", error_class="http_503")
     return CodexHealthProbe(state="unknown", error_class="codex_exit")
 

@@ -72,7 +72,7 @@ def test_probe_uses_one_read_only_ephemeral_json_codex_exec(monkeypatch):
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout='{"type":"completed"}\n', stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout='{"type":"turn.completed"}\n', stderr="")
 
     monkeypatch.setattr("trunkline.providerio.subprocess.run", run)
 
@@ -88,6 +88,31 @@ def test_probe_uses_one_read_only_ephemeral_json_codex_exec(monkeypatch):
     assert command[command.index("--sandbox") + 1] == "read-only"
     assert kwargs["timeout"] == 3
     assert "health check" in command[-1].casefold()
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expected_state", "expected_error"),
+    [
+        ('{"type":"error","error":{"message":"The model is not supported when using Codex with a ChatGPT account."}}\n',
+         "entitlement_unavailable", "model_unsupported"),
+        ('{"type":"turn.failed","error":{"detail":{"message":"The model is not supported when using Codex with a ChatGPT account."}}}\n',
+         "entitlement_unavailable", "model_unsupported"),
+        ('{"type":"error","message":"arbitrary provider failure"}\n{"type":"turn.completed"}\n',
+         "unknown", "codex_error"),
+        ('{"type":"error","message":"arbitrary provider failure"}\n', "unknown", "codex_error"),
+        ('{"type":"item.completed"}\n', "unknown", "codex_incomplete"),
+        ('not-json\n', "unknown", "codex_incomplete"),
+    ],
+)
+def test_zero_exit_probe_requires_completed_jsonl_without_error(monkeypatch, stdout,
+                                                                 expected_state, expected_error):
+    completed = subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+    monkeypatch.setattr("trunkline.providerio.subprocess.run", lambda *_args, **_kwargs: completed)
+
+    result = probe_codex_health(codex_path="codex", model="gpt-5.6-sol", timeout=3)
+
+    assert (result.state, result.error_class) == (expected_state, expected_error)
+    assert not hasattr(result, "stdout")
 
 
 @pytest.mark.parametrize(
