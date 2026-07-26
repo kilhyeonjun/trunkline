@@ -63,6 +63,46 @@ def test_write_state(sb_root, codex_home):
     assert loaded["version"] == 1
 
 
+def test_account_health_supersedes_same_triple_and_bounds_retention(sb_root, codex_home):
+    s = _store(sb_root, codex_home)
+    for observed_at in range(110):
+        s.record_account_health(
+            provider="codex", label="personal", model=f"model-{observed_at}",
+            state="entitlement_unavailable", observed_at=observed_at,
+        )
+    s.record_account_health(
+        provider="codex", label="personal", model="model-109",
+        state="healthy", observed_at=999,
+    )
+
+    health = s.load().account_health
+    assert len(health) == 100
+    assert [r for r in health if r["model"] == "model-109"] == [{
+        "provider": "codex", "label": "personal", "model": "model-109",
+        "state": "healthy", "observed_at": 999, "reset_at": None,
+        "error_class": None,
+    }]
+
+
+def test_account_health_provider_scope_does_not_collide_or_store_raw_fields(sb_root, codex_home):
+    s = _store(sb_root, codex_home)
+    for provider in ("codex", "other-provider"):
+        s.record_account_health(
+            provider=provider, label="personal", model="gpt-5.6-sol",
+            state="entitlement_unavailable", observed_at=1,
+            raw_message="do not retain", status=400, account_id="do not retain",
+        )
+
+    health = s.load().account_health
+    assert {(r["provider"], r["label"], r["model"]) for r in health} == {
+        ("codex", "personal", "gpt-5.6-sol"),
+        ("other-provider", "personal", "gpt-5.6-sol"),
+    }
+    assert all(set(r) == {
+        "provider", "label", "model", "state", "observed_at", "reset_at", "error_class",
+    } for r in health)
+
+
 def test_two_corruptions_both_backed_up(sb_root, codex_home):
     """같은 초 내 이중 corrupt도 각각 백업 — never silently destroy."""
     s = _store(sb_root, codex_home)

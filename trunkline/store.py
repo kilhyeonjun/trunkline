@@ -10,6 +10,12 @@ from pathlib import Path
 from .fsutil import atomic_write, secure_dir
 
 
+ACCOUNT_HEALTH_LIMIT = 100
+ACCOUNT_HEALTH_KEYS = frozenset({
+    "provider", "label", "model", "state", "observed_at", "reset_at", "error_class",
+})
+
+
 @dataclass
 class Account:
     label: str
@@ -24,6 +30,7 @@ class StoreData:
     auto_switched: dict[str, bool] = field(default_factory=dict)
     preferred: dict[str, str] = field(default_factory=dict)
     primary_reset_at: dict[str, float] = field(default_factory=dict)
+    account_health: list[dict[str, object]] = field(default_factory=list)
 
 
 class AccountStore:
@@ -45,6 +52,7 @@ class AccountStore:
                 auto_switched=dict(raw.get("auto_switched", {})),
                 preferred=dict(raw.get("preferred", {})),
                 primary_reset_at=dict(raw.get("primary_reset_at", {})),
+                account_health=self._clean_health(raw.get("account_health", [])),
             )
         except Exception:
             # corrupt: back up, start empty — never silently destroy (Mobius failure #13)
@@ -63,6 +71,7 @@ class AccountStore:
             "auto_switched": data.auto_switched,
             "preferred": data.preferred,
             "primary_reset_at": data.primary_reset_at,
+            "account_health": self._clean_health(data.account_health),
         }
         atomic_write(self.meta_path, json.dumps(payload, indent=2).encode())
 
@@ -73,6 +82,53 @@ class AccountStore:
 
     def labels(self, data: StoreData, provider: str) -> list[Account]:
         return [a for a in data.accounts if a.provider == provider]
+
+    @staticmethod
+    def _clean_health(records: object) -> list[dict[str, object]]:
+        if not isinstance(records, list):
+            return []
+        clean = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            values = {key: record.get(key) for key in ACCOUNT_HEALTH_KEYS}
+            valid_strings = all(
+                isinstance(values[key], str) and values[key]
+                for key in ("provider", "label", "model", "state")
+            )
+            valid_observed_at = not isinstance(values["observed_at"], bool) and isinstance(
+                values["observed_at"], int
+            )
+            valid_reset_at = values["reset_at"] is None or (
+                not isinstance(values["reset_at"], bool) and isinstance(values["reset_at"], int)
+            )
+            valid_error_class = values["error_class"] is None or isinstance(
+                values["error_class"], str
+            )
+            if valid_strings and valid_observed_at and valid_reset_at and valid_error_class:
+                clean.append(values)
+        return clean[-ACCOUNT_HEALTH_LIMIT:]
+
+    def record_account_health(self, *, provider: str, label: str, model: str,
+                              state: str, observed_at: int, reset_at: int | None = None,
+                              error_class: str | None = None, **_ignored: object) -> None:
+        record = self._clean_health([{
+            "provider": provider, "label": label, "model": model, "state": state,
+            "observed_at": observed_at, "reset_at": reset_at, "error_class": error_class,
+        }])
+        if not record:
+            return
+        data = self.load()
+        triple = (provider, label, model)
+        data.account_health = [
+            item for item in data.account_health
+            if (item["provider"], item["label"], item["model"]) != triple
+        ] + record
+        data.account_health = self._clean_health(data.account_health)
+        self.save(data)
+
+    def account_health_for_provider(self, provider: str) -> list[dict[str, object]]:
+        return [record for record in self.load().account_health if record["provider"] == provider]
 
     def write_state(self, state: dict) -> None:
         secure_dir(self.root)

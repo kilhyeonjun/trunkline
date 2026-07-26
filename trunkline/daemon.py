@@ -11,6 +11,7 @@ from .engine import (
     SHORT_WINDOW_MAX_MINUTES,
     AutoSwitchEngine,
     is_account_exhausting,
+    parse_account_health,
     parse_token_count,
 )
 from .providerio import CodexConfigIO
@@ -85,6 +86,39 @@ class Daemon:
         for line in self.router.poll(files):
             if switched:
                 break  # fallback 후 배치 소비 중단 — 구 계정 라인 오귀속 방지 (설계 §3.3)
+            for health_event in parse_account_health(line):
+                if health_event.state != "entitlement_unavailable":
+                    continue
+                self.store.record_account_health(
+                    provider=health_event.provider, label=health_event.label,
+                    model=health_event.model, state=health_event.state,
+                    observed_at=health_event.observed_at, reset_at=health_event.reset_at,
+                    error_class=health_event.error_class,
+                )
+                if mode != "auto" or health_event.provider != PROVIDER or health_event.label != active:
+                    continue
+                health = {
+                    (record["provider"], record["label"], record["model"]): record["state"]
+                    for record in self.store.load().account_health
+                }
+                decision = eng.on_unavailable(
+                    provider=PROVIDER, active=active, model=health_event.model,
+                    now=now, health=health,
+                )
+                if decision.kind == "fallback":
+                    self.switcher.switch(PROVIDER, decision.target, auto=True)
+                    self.router.quarantine_seen()
+                    eng.note_switch(now)
+                    self._last_event = {"type": "fallback", "from": active,
+                                        "to": decision.target, "at": now,
+                                        "reason": decision.reason}
+                    self._last_observed = None
+                    active = decision.target
+                    self._prev_active = active
+                    switched = True
+                    break
+            if switched:
+                break
             for ev in parse_token_count(line):
                 is_short_window = (ev.window_minutes is not None
                                    and ev.window_minutes < SHORT_WINDOW_MAX_MINUTES)
@@ -156,6 +190,12 @@ class Daemon:
                     ],
                     "observed": self._last_observed,
                     "last_event": self._last_event,
+                    "account_health": [
+                        {key: record[key] for key in (
+                            "label", "model", "state", "observed_at", "reset_at", "error_class"
+                        )}
+                        for record in self.store.account_health_for_provider(PROVIDER)
+                    ],
                 }
             },
         }
