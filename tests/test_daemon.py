@@ -52,7 +52,7 @@ def env(sb_root, codex_home, tmp_path):
     sessions.mkdir()
     store = AccountStore(root=sb_root, codex_home=codex_home)
     io = CodexConfigIO(codex_home)
-    sw = Switcher(store, {"codex": io})
+    sw = Switcher(store, {"codex": io}, stability_gap=0)
     store.save(StoreData(
         accounts=[Account("personal", "codex"), Account("company", "codex")],
         active_by_provider={"codex": "personal"},
@@ -75,7 +75,7 @@ def claude_env(sb_root, codex_home, tmp_path):
     sessions.mkdir()
     store = AccountStore(root=sb_root, codex_home=codex_home)
     io = CodexConfigIO(codex_home)
-    sw = Switcher(store, {"codex": io})
+    sw = Switcher(store, {"codex": io}, stability_gap=0)
     store.save(StoreData(
         accounts=[Account("personal", "codex"), Account("company", "codex")],
         active_by_provider={"codex": "personal"},
@@ -350,7 +350,7 @@ def test_primary_reset_persisted_across_restart(env):
     from trunkline.daemon import Daemon
     from trunkline.switcher import Switcher
     from trunkline.providerio import CodexConfigIO
-    d2 = Daemon(store, Switcher(store, {"codex": io}), io, sessions_dir=sessions,
+    d2 = Daemon(store, Switcher(store, {"codex": io}, stability_gap=0), io, sessions_dir=sessions,
                 claude_json=sessions / "no-claude.json",
                 claude_creds=sessions / "no-creds.json")
     d2.tick(now=1785060000.0)          # seed only
