@@ -17,9 +17,11 @@ class SwitchError(RuntimeError):
 
 
 class Switcher:
-    def __init__(self, store: AccountStore, ios: dict[str, ProviderConfigIO]):
+    def __init__(self, store: AccountStore, ios: dict[str, ProviderConfigIO],
+                 stability_gap: float = 0.7):
         self.store = store
         self.ios = ios
+        self.stability_gap = stability_gap
 
     def _account(self, provider: str, label: str) -> Account:
         data = self.store.load()
@@ -69,7 +71,7 @@ class Switcher:
 
         previous: bytes | None = None
         try:
-            previous = io.read_stable_live_secret()
+            previous = io.read_stable_live_secret(gap=self.stability_gap)
             self._save_back(provider, previous)
         except (OSError, UnstableFileError):
             previous = None  # 라이브 없음/불안정 — 되저장 생략하고 진행
@@ -96,7 +98,7 @@ class Switcher:
         if any(a.label == label for a in self.store.labels(data, provider)):
             raise SwitchError(f"label exists: {provider}/{label} (재로그인은 login 커맨드)")
         io = self.ios[provider]
-        live = io.read_stable_live_secret()
+        live = io.read_stable_live_secret(gap=self.stability_gap)
         account = Account(label, provider)
         atomic_write(self.store.secret_path(account), live)
         data.accounts.append(account)

@@ -315,3 +315,68 @@ def test_usage_human_claude_line(env, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "claude: 5h 0% · 7d 12%" in out
     assert "전 기준" in out
+
+
+def test_health_without_probe_reads_redacted_persisted_state_without_subprocess(env, monkeypatch, capsys):
+    sb_root, codex_home = env
+    cli.main(["init", "--priority", "personal,company"])
+    store = AccountStore(root=sb_root, codex_home=codex_home)
+    store.record_account_health(
+        provider="codex", label="personal", model="gpt-5.6-sol",
+        state="entitlement_unavailable", observed_at=123, error_class="model_unsupported",
+    )
+    monkeypatch.setattr(cli.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("must not probe"))
+    capsys.readouterr()
+
+    assert cli.main(["health"]) == 0
+
+    out = capsys.readouterr().out
+    assert "personal gpt-5.6-sol entitlement_unavailable" in out
+    assert "acct-p" not in out
+    assert "token" not in out.casefold()
+
+
+def test_health_probe_requires_nonempty_model_and_bounded_timeout(env, capsys):
+    assert cli.main(["health", "--probe"]) == 2
+    assert cli.main(["health", "--probe", "--model", "", "--timeout", "3"]) == 2
+    with pytest.raises(SystemExit) as low_timeout:
+        cli.main(["health", "--probe", "--model", "gpt-5.6-sol", "--timeout", "0"])
+    assert low_timeout.value.code == 2
+    with pytest.raises(SystemExit) as high_timeout:
+        cli.main(["health", "--probe", "--model", "gpt-5.6-sol", "--timeout", "31"])
+    assert high_timeout.value.code == 2
+
+
+def test_health_probe_persists_one_normalized_active_account_event(env, monkeypatch, capsys):
+    sb_root, codex_home = env
+    cli.main(["init", "--priority", "personal,company"])
+    calls = []
+
+    class Outcome:
+        state = "entitlement_unavailable"
+        error_class = "model_unsupported"
+
+    monkeypatch.setattr(cli, "probe_codex_health", lambda **kwargs: Outcome())
+    original = AccountStore.record_account_health
+
+    def record(self, **kwargs):
+        calls.append(kwargs)
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(AccountStore, "record_account_health", record)
+    capsys.readouterr()
+
+    assert cli.main(["health", "--probe", "--model", "gpt-5.6-sol", "--timeout", "3"]) == 1
+
+    assert calls == [{
+        "provider": "codex", "label": "personal", "model": "gpt-5.6-sol",
+        "state": "entitlement_unavailable", "observed_at": calls[0]["observed_at"],
+        "reset_at": None, "error_class": "model_unsupported",
+    }]
+    assert isinstance(calls[0]["observed_at"], int)
+    persisted = AccountStore(root=sb_root, codex_home=codex_home).load().account_health
+    assert persisted == [{
+        "provider": "codex", "label": "personal", "model": "gpt-5.6-sol",
+        "state": "entitlement_unavailable", "observed_at": calls[0]["observed_at"],
+        "reset_at": None, "error_class": "model_unsupported",
+    }]

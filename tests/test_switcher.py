@@ -13,11 +13,21 @@ def _auth(account_id: str) -> bytes:
     return json.dumps({"tokens": {"account_id": account_id}}).encode()
 
 
+def test_switcher_accepts_injected_stability_gap(sb_root, codex_home):
+    """Tests may remove the wait without changing the production default."""
+    store = AccountStore(root=sb_root, codex_home=codex_home)
+    io = CodexConfigIO(codex_home)
+
+    switcher = Switcher(store, {"codex": io}, stability_gap=0)
+
+    assert switcher.stability_gap == 0
+
+
 @pytest.fixture
 def env(sb_root, codex_home):
     store = AccountStore(root=sb_root, codex_home=codex_home)
     io = CodexConfigIO(codex_home)
-    sw = Switcher(store, {"codex": io})
+    sw = Switcher(store, {"codex": io}, stability_gap=0)
     data = StoreData(
         accounts=[Account("personal", "codex"), Account("company", "codex")],
         active_by_provider={"codex": "personal"},
@@ -32,6 +42,21 @@ def env(sb_root, codex_home):
         p.write_bytes(_auth(acct))
     (codex_home / "auth.json").write_bytes(_auth("acct-p"))
     return store, io, sw
+
+
+def test_switcher_default_passes_production_stability_gap(env, monkeypatch):
+    store, io, _ = env
+    gaps = []
+
+    def read_stable_live_secret(*, gap: float = 0.7) -> bytes:
+        gaps.append(gap)
+        return io.read_live_secret()
+
+    monkeypatch.setattr(io, "read_stable_live_secret", read_stable_live_secret)
+
+    Switcher(store, {"codex": io}).switch("codex", "company")
+
+    assert gaps == [0.7]
 
 
 def test_current_label_matches_by_account_id(env):

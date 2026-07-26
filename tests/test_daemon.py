@@ -32,13 +32,27 @@ def _two_window_line(primary_resets_at, secondary_resets_at,
                       "resets_at": secondary_resets_at}}}})
 
 
+def _health_line(provider="codex", label="personal", model="gpt-5.6-sol",
+                 status=400, message=None, observed_at=1) -> str:
+    return json.dumps({
+        "type": "account_health", "provider": provider, "label": label,
+        "model": model, "status": status,
+        "message": message or (
+            "The 'gpt-5.6-sol' model is not supported when using Codex "
+            "with a ChatGPT account."
+        ),
+        "observed_at": observed_at,
+        "account_id": "must-not-persist", "secret": "must-not-persist",
+    })
+
+
 @pytest.fixture
 def env(sb_root, codex_home, tmp_path):
     sessions = tmp_path / "sessions"
     sessions.mkdir()
     store = AccountStore(root=sb_root, codex_home=codex_home)
     io = CodexConfigIO(codex_home)
-    sw = Switcher(store, {"codex": io})
+    sw = Switcher(store, {"codex": io}, stability_gap=0)
     store.save(StoreData(
         accounts=[Account("personal", "codex"), Account("company", "codex")],
         active_by_provider={"codex": "personal"},
@@ -61,7 +75,7 @@ def claude_env(sb_root, codex_home, tmp_path):
     sessions.mkdir()
     store = AccountStore(root=sb_root, codex_home=codex_home)
     io = CodexConfigIO(codex_home)
-    sw = Switcher(store, {"codex": io})
+    sw = Switcher(store, {"codex": io}, stability_gap=0)
     store.save(StoreData(
         accounts=[Account("personal", "codex"), Account("company", "codex")],
         active_by_provider={"codex": "personal"},
@@ -120,6 +134,51 @@ def test_lock_mode_never_switches(env):
     f.write_text(_exhaust_line() + "\n")
     d.tick(now=10.0)
     assert store.load().active_by_provider["codex"] == "personal"
+
+
+def test_entitlement_event_persists_redacted_health_and_auto_switches_once(env):
+    d, store, io, sessions = env
+    f = sessions / "s1.jsonl"
+    f.write_text("")
+    d.tick(now=0.0)
+    f.write_text(_health_line() + "\n")
+    d.tick(now=10.0)
+
+    state = json.loads(store.state_path.read_text())["providers"]["codex"]
+    assert store.load().active_by_provider["codex"] == "company"
+    assert state["account_health"] == [{
+        "label": "personal", "model": "gpt-5.6-sol",
+        "state": "entitlement_unavailable", "observed_at": 1,
+        "reset_at": None, "error_class": None,
+    }]
+
+
+def test_entitlement_event_in_lock_mode_is_persisted_but_never_switches(env):
+    d, store, io, sessions = env
+    data = store.load()
+    data.mode_by_provider["codex"] = "lock"
+    store.save(data)
+    f = sessions / "s1.jsonl"
+    f.write_text("")
+    d.tick(now=0.0)
+    f.write_text(_health_line() + "\n")
+    d.tick(now=10.0)
+
+    assert store.load().active_by_provider["codex"] == "personal"
+    assert json.loads(store.state_path.read_text())["providers"]["codex"]["account_health"]
+
+
+def test_transient_or_unknown_health_never_persists_or_switches(env):
+    d, store, io, sessions = env
+    f = sessions / "s1.jsonl"
+    f.write_text("")
+    d.tick(now=0.0)
+    f.write_text(_health_line(status=503, message="Too many concurrent requests") + "\n")
+    d.tick(now=10.0)
+
+    state = json.loads(store.state_path.read_text())["providers"]["codex"]
+    assert store.load().active_by_provider["codex"] == "personal"
+    assert state["account_health"] == []
 
 
 def test_state_json_published(env):
@@ -212,7 +271,7 @@ def test_v2_schema_fields(env):
     d.tick(1000.0)
     d.tick(1003.0)
     p = json.loads(store.state_path.read_text())["providers"]["codex"]
-    assert set(p) == {"active", "mode", "accounts", "observed", "last_event"}
+    assert set(p) == {"active", "mode", "accounts", "observed", "last_event", "account_health"}
     assert all(set(a) == {"label", "snapshot_ok"} for a in p["accounts"])
 
 
@@ -291,7 +350,7 @@ def test_primary_reset_persisted_across_restart(env):
     from trunkline.daemon import Daemon
     from trunkline.switcher import Switcher
     from trunkline.providerio import CodexConfigIO
-    d2 = Daemon(store, Switcher(store, {"codex": io}), io, sessions_dir=sessions,
+    d2 = Daemon(store, Switcher(store, {"codex": io}, stability_gap=0), io, sessions_dir=sessions,
                 claude_json=sessions / "no-claude.json",
                 claude_creds=sessions / "no-creds.json")
     d2.tick(now=1785060000.0)          # seed only

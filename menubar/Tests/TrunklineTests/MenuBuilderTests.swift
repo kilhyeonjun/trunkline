@@ -209,6 +209,21 @@ final class MenuBuilderTests: XCTestCase {
         }
     }
 
+    func testAccountHealthMenuRowIsLocalizedAndRedacted() {
+        let json = """
+        {"version": 2, "updated_at": 1000.0, "providers": {"codex": {
+          "active": "personal", "mode": "auto",
+          "accounts": [{"label": "personal", "snapshot_ok": true}],
+          "account_health": [{"label":"personal","model":"gpt-5.6-sol","state":"auth_stale",
+                               "error_class":"provider token expired: secret-value"}]}}}
+        """
+        let items = buildMenuSpec(state: state(json), usage: nil, now: 1000, wakeGraceUntil: 0)
+        let healthRow = items.first { $0.title == "계정 상태: 인증 갱신 필요" }
+        XCTAssertEqual(healthRow?.rightRuns, [StyledRun(text: "심각", style: .danger)])
+        XCTAssertFalse(items.map(\.title).joined(separator: " ").contains("secret-value"))
+        XCTAssertFalse(items.map(\.title).joined(separator: " ").contains("gpt-5.6-sol"))
+    }
+
     // claude JSON — good state + claude 엔트리 부착본
     func stateWithClaude(_ claudeJSON: String) -> TrunklineState {
         let json = """

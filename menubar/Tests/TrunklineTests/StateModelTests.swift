@@ -93,4 +93,41 @@ final class StateModelTests: XCTestCase {
         let s = try XCTUnwrap(TrunklineState.load(from: Data(json.utf8)))
         XCTAssertEqual(s.claude?.loginWarning, "만료 임박 D-3")
     }
+
+    func testParsesAccountHealthStatesAndRedactsProviderText() throws {
+        let json = """
+        {"version": 2, "updated_at": 1000.0, "providers": {"codex": {
+          "active": "personal", "mode": "auto",
+          "accounts": [{"label": "personal", "snapshot_ok": true}],
+          "account_health": [
+            {"label":"a","model":"m","state":"healthy","observed_at":1},
+            {"label":"b","model":"m","state":"usage_exhausted","observed_at":2,"reset_at":3},
+            {"label":"c","model":"m","state":"entitlement_unavailable","observed_at":4,"error_class":"redacted"},
+            {"label":"d","model":"m","state":"auth_stale","observed_at":5},
+            {"label":"e","model":"m","state":"temporarily_throttled","observed_at":6},
+            {"label":"f","model":"m","state":"unknown","observed_at":7}
+          ]}}}
+        """
+        let health = try XCTUnwrap(TrunklineState.load(from: Data(json.utf8))?.provider.accountHealth)
+        XCTAssertEqual(health.map(\.state), [.healthy, .usageExhausted, .entitlementUnavailable,
+                                             .authStale, .temporarilyThrottled, .unknown])
+        XCTAssertEqual(health[1].resetAt, 3)
+        XCTAssertEqual(health[2].errorClass, "redacted")
+        XCTAssertFalse(String(describing: health).contains("provider"))
+    }
+
+    func testAccountHealthFutureAndMissingOptionalsAreConservative() throws {
+        let json = """
+        {"version": 2, "updated_at": 1000.0, "providers": {"codex": {
+          "active": "personal", "mode": "auto",
+          "accounts": [{"label": "personal", "snapshot_ok": true}],
+          "account_health": [{"label":"personal","model":"m","state":"future_state"}, {}]}}}
+        """
+        let health = try XCTUnwrap(TrunklineState.load(from: Data(json.utf8))?.provider.accountHealth)
+        XCTAssertEqual(health.map(\.state), [.unknown, .unknown])
+        XCTAssertNil(health[0].observedAt)
+        XCTAssertNil(health[1].label)
+        XCTAssertNil(health[1].model)
+        XCTAssertNil(health[1].errorClass)
+    }
 }

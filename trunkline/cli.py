@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import shutil
 import subprocess
@@ -10,8 +11,9 @@ from pathlib import Path
 
 from .claude_status import LIVE_JSON_DEFAULT, age_text, login_warning, read_claude_status
 from .daemon import Daemon
+from .engine import AccountHealthEvent
 from .identity import decode_identity
-from .providerio import CodexConfigIO
+from .providerio import CodexConfigIO, probe_codex_health
 from .store import Account, AccountStore, StoreData
 from .switcher import Switcher, SwitchError
 from .usage import read_usage
@@ -198,6 +200,57 @@ def _cmd_daemon(args) -> int:  # pragma: no cover
     return 0
 
 
+def _bounded_probe_timeout(value: str) -> float:
+    try:
+        timeout = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("timeout must be numeric") from exc
+    if not math.isfinite(timeout) or not 1 <= timeout <= 30:
+        raise argparse.ArgumentTypeError("timeout must be between 1 and 30 seconds")
+    return timeout
+
+
+def _print_health(records: list[dict[str, object]]) -> None:
+    if not records:
+        print("codex: unknown (no persisted health)")
+        return
+    for record in records:
+        print(
+            f"{record['label']} {record['model']} {record['state']} "
+            f"({record['error_class'] or '-'})"
+        )
+
+
+def _cmd_health(args) -> int:
+    store, _, _ = _wiring()
+    data = store.load()
+    if not args.probe:
+        _print_health(store.account_health_for_provider(PROVIDER))
+        return 0
+    if not args.model.strip():
+        print("health --probe requires a nonempty --model", file=sys.stderr)
+        return 2
+    active = data.active_by_provider.get(PROVIDER)
+    if not active:
+        print("codex: unknown (no active account)", file=sys.stderr)
+        return 1
+    outcome = probe_codex_health(codex_path="codex", model=args.model, timeout=args.timeout)
+    event = AccountHealthEvent(
+        provider=PROVIDER, label=active, model=args.model, state=outcome.state,
+        observed_at=int(time.time()), error_class=outcome.error_class,
+    )
+    store.record_account_health(
+        provider=event.provider, label=event.label, model=event.model,
+        state=event.state, observed_at=event.observed_at, reset_at=event.reset_at,
+        error_class=event.error_class,
+    )
+    _print_health([{
+        "label": event.label, "model": event.model, "state": event.state,
+        "error_class": event.error_class,
+    }])
+    return 0 if event.state == "healthy" else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="trunkline")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -214,6 +267,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("usage")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=_cmd_usage)
+    p = sub.add_parser("health")
+    p.add_argument("--probe", action="store_true")
+    p.add_argument("--model", default="")
+    p.add_argument("--timeout", type=_bounded_probe_timeout, default=10.0)
+    p.set_defaults(fn=_cmd_health)
     sub.add_parser("daemon").set_defaults(fn=_cmd_daemon)
     from .cutover import add_cutover_parser
     add_cutover_parser(sub)

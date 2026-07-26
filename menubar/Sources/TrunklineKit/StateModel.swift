@@ -23,14 +23,87 @@ public struct LastEvent: Decodable, Equatable {
     public let reason: String?
 }
 
+public enum AccountHealthState: Equatable, Decodable {
+    case healthy, usageExhausted, entitlementUnavailable, authStale, temporarilyThrottled, unknown
+
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value {
+        case "healthy": self = .healthy
+        case "usage_exhausted": self = .usageExhausted
+        case "entitlement_unavailable": self = .entitlementUnavailable
+        case "auth_stale": self = .authStale
+        case "temporarily_throttled": self = .temporarilyThrottled
+        default: self = .unknown
+        }
+    }
+}
+
+public struct AccountHealth: Decodable, Equatable {
+    public let label: String?
+    public let model: String?
+    public let state: AccountHealthState
+    public let observedAt: Double?
+    public let resetAt: Double?
+    public let errorClass: String?
+
+    enum CodingKeys: String, CodingKey {
+        case label, model, state
+        case observedAt = "observed_at"
+        case resetAt = "reset_at"
+        case errorClass = "error_class"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        label = try values.decodeIfPresent(String.self, forKey: .label)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        state = try values.decodeIfPresent(AccountHealthState.self, forKey: .state) ?? .unknown
+        observedAt = try values.decodeIfPresent(Double.self, forKey: .observedAt)
+        resetAt = try values.decodeIfPresent(Double.self, forKey: .resetAt)
+        errorClass = try values.decodeIfPresent(String.self, forKey: .errorClass)
+    }
+}
+
+public enum AccountHealthSeverity: Equatable {
+    case normal, unknown, transient, severe
+
+    public init(state: AccountHealthState) {
+        switch state {
+        case .healthy: self = .normal
+        case .unknown: self = .unknown
+        case .temporarilyThrottled: self = .transient
+        case .usageExhausted, .entitlementUnavailable, .authStale: self = .severe
+        }
+    }
+}
+
 public struct ProviderState: Decodable, Equatable {
     public let active: String?
     public let mode: String
     public let accounts: [AccountState]
     public let observed: Observed?
     public let lastEvent: LastEvent?
+    public let accountHealth: [AccountHealth]
     enum CodingKeys: String, CodingKey {
-        case active, mode, accounts, observed; case lastEvent = "last_event"
+        case active, mode, accounts, observed, accountHealth = "account_health"; case lastEvent = "last_event"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        active = try values.decodeIfPresent(String.self, forKey: .active)
+        mode = try values.decode(String.self, forKey: .mode)
+        accounts = try values.decode([AccountState].self, forKey: .accounts)
+        observed = try values.decodeIfPresent(Observed.self, forKey: .observed)
+        lastEvent = try values.decodeIfPresent(LastEvent.self, forKey: .lastEvent)
+        accountHealth = try values.decodeIfPresent([AccountHealth].self, forKey: .accountHealth) ?? []
+    }
+
+    public func health(for label: String?) -> AccountHealth? {
+        guard let label else { return nil }
+        return accountHealth
+            .filter { $0.label == label }
+            .max { ($0.observedAt ?? -.infinity) < ($1.observedAt ?? -.infinity) }
     }
 }
 

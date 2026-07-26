@@ -1,12 +1,277 @@
+import json
 from pathlib import Path
 
-from trunkline.engine import AutoSwitchEngine, Decision, RateLimitEvent, parse_token_count
+import pytest
+
+from trunkline.engine import (
+    AccountHealthEvent,
+    AutoSwitchEngine,
+    Decision,
+    RateLimitEvent,
+    parse_account_health,
+    parse_token_count,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "rollout-sample.jsonl"
 
 
 def _lines():
     return FIXTURE.read_text().splitlines()
+
+
+def test_exact_chatgpt_model_rejection_is_entitlement_unavailable():
+    line = json.dumps({
+        "type": "account_health",
+        "provider": "codex",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "status": 400,
+        "message": (
+            "The 'gpt-5.6-sol' model is not supported when using Codex "
+            "with a ChatGPT account."
+        ),
+        "observed_at": 1,
+    })
+
+    assert parse_account_health(line)[0].state == "entitlement_unavailable"
+
+
+def test_entitlement_message_normalizes_whitespace_before_matching():
+    line = json.dumps({
+        "type": "account_health",
+        "provider": "codex",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "status": 400,
+        "message": (
+            "The model  is not supported when using Codex\n"
+            "with a ChatGPT account."
+        ),
+        "observed_at": 1,
+    })
+
+    assert parse_account_health(line)[0].state == "entitlement_unavailable"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Error: The model is not supported when using Codex with a ChatGPT account.",
+        "The model is not supported when using Codex with a ChatGPT account. Retry later.",
+    ],
+)
+def test_entitlement_message_rejects_arbitrary_prefix_or_suffix(message):
+    line = json.dumps({
+        "type": "account_health",
+        "provider": "codex",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "status": 400,
+        "message": message,
+        "observed_at": 1,
+    })
+
+    assert parse_account_health(line)[0].state == "unknown"
+
+
+@pytest.mark.parametrize(
+    "status,message",
+    [(400, "invalid request"), (503, "Too many concurrent requests")],
+)
+def test_ambiguous_or_transient_errors_are_not_persisted_as_entitlement(status, message):
+    line = json.dumps({
+        "type": "account_health",
+        "provider": "codex",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "status": status,
+        "message": message,
+        "observed_at": 1,
+    })
+
+    assert all(event.state != "entitlement_unavailable" for event in parse_account_health(line))
+
+
+def test_account_health_event_preserves_optional_fields():
+    line = json.dumps({
+        "type": "account_health",
+        "provider": "codex",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "observed_at": 1,
+        "reset_at": 2,
+        "error_class": "provider_error",
+    })
+
+    assert parse_account_health(line) == [
+        AccountHealthEvent(
+            provider="codex",
+            label="personal",
+            model="gpt-5.6-sol",
+            state="unknown",
+            observed_at=1,
+            reset_at=2,
+            error_class="provider_error",
+        )
+    ]
+
+
+@pytest.mark.parametrize("provider", [None, ""])
+def test_account_health_requires_nonempty_provider(provider):
+    payload = {
+        "type": "account_health",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "observed_at": 1,
+    }
+    if provider is not None:
+        payload["provider"] = provider
+
+    assert parse_account_health(json.dumps(payload)) == []
+
+
+@pytest.mark.parametrize("field", ["provider", "label", "model"])
+@pytest.mark.parametrize("value", ["", "   ", "\t"])
+def test_account_health_rejects_blank_scope_fields(field, value):
+    payload = {
+        "type": "account_health", "provider": "codex", "label": "personal",
+        "model": "gpt-5.6-sol", "observed_at": 1,
+    }
+    payload[field] = value
+
+    assert parse_account_health(json.dumps(payload)) == []
+
+
+def test_unavailable_health_is_scoped_by_provider_label_and_model():
+    engine = AutoSwitchEngine(priority=["personal", "company"])
+
+    decision = engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health={
+            ("other-provider", "personal", "gpt-5.6-sol"): "entitlement_unavailable",
+        },
+    )
+
+    assert decision == Decision(kind="none", target=None, reason="")
+
+
+def test_unavailable_model_falls_back_to_next_configured_account():
+    engine = AutoSwitchEngine(priority=["personal", "company"])
+
+    decision = engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health={("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable"},
+    )
+
+    assert decision == Decision(
+        kind="fallback",
+        target="company",
+        reason="personal unavailable for gpt-5.6-sol",
+    )
+
+
+def test_unavailable_skips_successor_unavailable_for_the_same_model():
+    engine = AutoSwitchEngine(priority=["personal", "company", "fallback"])
+
+    decision = engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health={
+            ("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable",
+            ("codex", "company", "gpt-5.6-sol"): "entitlement_unavailable",
+        },
+    )
+
+    assert decision == Decision(
+        kind="fallback",
+        target="fallback",
+        reason="personal unavailable for gpt-5.6-sol",
+    )
+
+
+@pytest.mark.parametrize(
+    ("successor_state", "target"),
+    [
+        ("usage_exhausted", "fallback"),
+        ("auth_stale", "fallback"),
+        ("temporarily_throttled", "fallback"),
+        ("entitlement_unavailable", "fallback"),
+        ("unknown", "company"),
+        ("healthy", "company"),
+        (None, "company"),
+    ],
+)
+def test_unavailable_selects_only_eligible_successor_health_states(successor_state, target):
+    engine = AutoSwitchEngine(priority=["personal", "company", "fallback"])
+    health = {
+        ("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable",
+    }
+    if successor_state is not None:
+        health[("codex", "company", "gpt-5.6-sol")] = successor_state
+
+    decision = engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health=health,
+    )
+
+    assert decision.target == target
+
+
+def test_unavailable_does_not_switch_for_ambiguous_model_input():
+    engine = AutoSwitchEngine(priority=["personal", "company"])
+
+    decision = engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="",
+        now=1.0,
+        health={("codex", "personal", ""): "entitlement_unavailable"},
+    )
+
+    assert decision == Decision(kind="none", target=None, reason="")
+
+
+def test_unavailable_requires_entitlement_and_an_available_successor():
+    engine = AutoSwitchEngine(priority=["personal", "company"])
+
+    assert engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health={},
+    ) == Decision(kind="none", target=None, reason="")
+    assert engine.on_unavailable(
+        provider="codex",
+        active="company",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health={("codex", "company", "gpt-5.6-sol"): "entitlement_unavailable"},
+    ) == Decision(kind="none", target=None, reason="")
+
+
+def test_unavailable_respects_switch_cooldown():
+    engine = AutoSwitchEngine(priority=["personal", "company"])
+    engine.note_switch(now=1.0)
+
+    assert engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=2.0,
+        health={("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable"},
+    ) == Decision(kind="none", target=None, reason="")
 
 
 def test_parse_extracts_primary_and_secondary():

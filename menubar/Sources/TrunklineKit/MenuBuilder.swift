@@ -36,6 +36,17 @@ func freshnessText(now: Double, at: Double?) -> String {
     return relativeText(seconds: age) + " 전 갱신 ⚠︎"
 }
 
+func accountHealthText(_ state: AccountHealthState) -> String {
+    switch state {
+    case .healthy: return "정상"
+    case .usageExhausted: return "사용량 소진"
+    case .entitlementUnavailable: return "이용 권한 없음"
+    case .authStale: return "인증 갱신 필요"
+    case .temporarilyThrottled: return "일시적 요청 제한"
+    case .unknown: return "상태 확인 필요"
+    }
+}
+
 public func buildMenuSpec(state: TrunklineState?, usage: [UsageRow]?,
                           now: Double, wakeGraceUntil: Double,
                           pythonWarning: String? = nil,
@@ -85,6 +96,17 @@ public func buildMenuSpec(state: TrunklineState?, usage: [UsageRow]?,
                                   enabled: actionable && a.snapshotOk,
                                   action: ["switch", a.label],
                                   rightRuns: rightRuns.isEmpty ? nil : rightRuns))
+    }
+    if let accountHealth = s.provider.health(for: active) {
+        let severity = AccountHealthSeverity(state: accountHealth.state)
+        let run: StyledRun = switch severity {
+        case .normal: StyledRun(text: "정상", style: .normal)
+        case .unknown: StyledRun(text: "확인 필요", style: .warn)
+        case .transient: StyledRun(text: "일시적", style: .warn)
+        case .severe: StyledRun(text: "심각", style: .danger)
+        }
+        items.append(MenuItemSpec(title: "계정 상태: \(accountHealthText(accountHealth.state))",
+                                  enabled: false, rightRuns: [run]))
     }
 
     // 창 행들 — wham 창별(계정마다 primary·secondary, 존재하는 창만) + observed 5h "(관측)".
