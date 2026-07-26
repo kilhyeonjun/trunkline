@@ -3,12 +3,17 @@ the daemon owns side effects (Mobius AutoSwitchEngine port, design §4.5)."""
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 SHORT_WINDOW_MAX_MINUTES = 1440   # window_minutes < 1440 → 단기(5h류) 창
 COOLDOWN_S = 120.0
 RETURN_GRACE_S = 60.0
-ENTITLEMENT_FRAGMENT = "model is not supported when using codex with a chatgpt account"
+ENTITLEMENT_MESSAGE = re.compile(
+    r"^the (?:(?P<quote>['\"])[^'\"]+(?P=quote) )?model is not supported "
+    r"when using codex with a chatgpt account\.?$"
+)
+SELECTABLE_SUCCESSOR_STATES = {None, "healthy", "unknown"}
 HEALTH_STATES = {
     "healthy",
     "usage_exhausted",
@@ -83,7 +88,7 @@ def parse_account_health(line: str) -> list[AccountHealthEvent]:
     is_entitlement_unavailable = (
         status == 400
         and isinstance(message, str)
-        and ENTITLEMENT_FRAGMENT in " ".join(message.casefold().split())
+        and ENTITLEMENT_MESSAGE.fullmatch(" ".join(message.casefold().split())) is not None
     )
     return [AccountHealthEvent(
         provider=provider,
@@ -165,7 +170,7 @@ class AutoSwitchEngine:
         except ValueError:
             return NONE
         for candidate in self.priority[idx + 1:]:
-            if health.get((provider, candidate, model)) == "entitlement_unavailable":
+            if health.get((provider, candidate, model)) not in SELECTABLE_SUCCESSOR_STATES:
                 continue
             return Decision(
                 kind="fallback",

@@ -54,6 +54,27 @@ def test_entitlement_message_normalizes_whitespace_before_matching():
 
 
 @pytest.mark.parametrize(
+    "message",
+    [
+        "Error: The model is not supported when using Codex with a ChatGPT account.",
+        "The model is not supported when using Codex with a ChatGPT account. Retry later.",
+    ],
+)
+def test_entitlement_message_rejects_arbitrary_prefix_or_suffix(message):
+    line = json.dumps({
+        "type": "account_health",
+        "provider": "codex",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "status": 400,
+        "message": message,
+        "observed_at": 1,
+    })
+
+    assert parse_account_health(line)[0].state == "unknown"
+
+
+@pytest.mark.parametrize(
     "status,message",
     [(400, "invalid request"), (503, "Too many concurrent requests")],
 )
@@ -162,6 +183,37 @@ def test_unavailable_skips_successor_unavailable_for_the_same_model():
         target="fallback",
         reason="personal unavailable for gpt-5.6-sol",
     )
+
+
+@pytest.mark.parametrize(
+    ("successor_state", "target"),
+    [
+        ("usage_exhausted", "fallback"),
+        ("auth_stale", "fallback"),
+        ("temporarily_throttled", "fallback"),
+        ("entitlement_unavailable", "fallback"),
+        ("unknown", "company"),
+        ("healthy", "company"),
+        (None, "company"),
+    ],
+)
+def test_unavailable_selects_only_eligible_successor_health_states(successor_state, target):
+    engine = AutoSwitchEngine(priority=["personal", "company", "fallback"])
+    health = {
+        ("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable",
+    }
+    if successor_state is not None:
+        health[("codex", "company", "gpt-5.6-sol")] = successor_state
+
+    decision = engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health=health,
+    )
+
+    assert decision.target == target
 
 
 def test_unavailable_does_not_switch_for_ambiguous_model_input():
