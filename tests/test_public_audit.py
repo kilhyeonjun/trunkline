@@ -64,6 +64,20 @@ def test_v011_release_metadata_and_docs_stay_consistent():
     assert "health --probe" in notes and "rollback" in notes
 
 
+def test_v011_rollback_instructions_are_executable_and_verified():
+    root = Path(__file__).resolve().parents[1]
+    notes = (root / "docs/releases/v0.1.1.md").read_text()
+    url = (
+        "https://github.com/kilhyeonjun/trunkline/releases/download/v0.1.0/"
+        "trunkline-0.1.0-py3-none-any.whl"
+    )
+    checksum = "8ea376582bd2e23e0cb1f98bbe831f15138c622cbb943ca8054699ed7cc86175"
+
+    assert f"curl -fL -o trunkline-0.1.0-py3-none-any.whl {url}" in notes
+    assert f"echo '{checksum}  trunkline-0.1.0-py3-none-any.whl' | shasum -a 256 -c -" in notes
+    assert "pipx install --force trunkline-0.1.0-py3-none-any.whl" in notes
+
+
 def test_packaging_uses_current_spdx_license_metadata():
     root = Path(__file__).resolve().parents[1]
     pyproject = (root / "pyproject.toml").read_text()
