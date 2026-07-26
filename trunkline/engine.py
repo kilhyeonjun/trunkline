@@ -29,6 +29,7 @@ class RateLimitEvent:
 
 @dataclass(frozen=True)
 class AccountHealthEvent:
+    provider: str
     label: str
     model: str
     state: str
@@ -55,11 +56,14 @@ def parse_account_health(line: str) -> list[AccountHealthEvent]:
     if not isinstance(obj, dict) or obj.get("type") != "account_health":
         return []
 
+    provider = obj.get("provider")
     label = obj.get("label")
     model = obj.get("model")
     observed_at = obj.get("observed_at")
     if (
-        not isinstance(label, str)
+        not isinstance(provider, str)
+        or not provider
+        or not isinstance(label, str)
         or not isinstance(model, str)
         or isinstance(observed_at, bool)
         or not isinstance(observed_at, int)
@@ -82,6 +86,7 @@ def parse_account_health(line: str) -> list[AccountHealthEvent]:
         and ENTITLEMENT_FRAGMENT in " ".join(message.casefold().split())
     )
     return [AccountHealthEvent(
+        provider=provider,
         label=label,
         model=model,
         state="entitlement_unavailable" if is_entitlement_unavailable else "unknown",
@@ -147,20 +152,20 @@ class AutoSwitchEngine:
         return Decision(kind="fallback", target=self.priority[idx + 1],
                         reason=f"{active} exhausted")
 
-    def on_unavailable(self, active: str, model: str, now: float,
-                       health: dict[tuple[str, str], str]) -> Decision:
-        if not active or not model:
+    def on_unavailable(self, provider: str, active: str, model: str, now: float,
+                       health: dict[tuple[str, str, str], str]) -> Decision:
+        if not provider or not active or not model:
             return NONE
         if self._in_cooldown(now):
             return NONE
-        if health.get((active, model)) != "entitlement_unavailable":
+        if health.get((provider, active, model)) != "entitlement_unavailable":
             return NONE
         try:
             idx = self.priority.index(active)
         except ValueError:
             return NONE
         for candidate in self.priority[idx + 1:]:
-            if health.get((candidate, model)) == "entitlement_unavailable":
+            if health.get((provider, candidate, model)) == "entitlement_unavailable":
                 continue
             return Decision(
                 kind="fallback",

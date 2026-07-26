@@ -22,6 +22,7 @@ def _lines():
 def test_exact_chatgpt_model_rejection_is_entitlement_unavailable():
     line = json.dumps({
         "type": "account_health",
+        "provider": "codex",
         "label": "personal",
         "model": "gpt-5.6-sol",
         "status": 400,
@@ -38,6 +39,7 @@ def test_exact_chatgpt_model_rejection_is_entitlement_unavailable():
 def test_entitlement_message_normalizes_whitespace_before_matching():
     line = json.dumps({
         "type": "account_health",
+        "provider": "codex",
         "label": "personal",
         "model": "gpt-5.6-sol",
         "status": 400,
@@ -58,6 +60,7 @@ def test_entitlement_message_normalizes_whitespace_before_matching():
 def test_ambiguous_or_transient_errors_are_not_persisted_as_entitlement(status, message):
     line = json.dumps({
         "type": "account_health",
+        "provider": "codex",
         "label": "personal",
         "model": "gpt-5.6-sol",
         "status": status,
@@ -71,6 +74,7 @@ def test_ambiguous_or_transient_errors_are_not_persisted_as_entitlement(status, 
 def test_account_health_event_preserves_optional_fields():
     line = json.dumps({
         "type": "account_health",
+        "provider": "codex",
         "label": "personal",
         "model": "gpt-5.6-sol",
         "observed_at": 1,
@@ -80,6 +84,7 @@ def test_account_health_event_preserves_optional_fields():
 
     assert parse_account_health(line) == [
         AccountHealthEvent(
+            provider="codex",
             label="personal",
             model="gpt-5.6-sol",
             state="unknown",
@@ -90,14 +95,45 @@ def test_account_health_event_preserves_optional_fields():
     ]
 
 
+@pytest.mark.parametrize("provider", [None, ""])
+def test_account_health_requires_nonempty_provider(provider):
+    payload = {
+        "type": "account_health",
+        "label": "personal",
+        "model": "gpt-5.6-sol",
+        "observed_at": 1,
+    }
+    if provider is not None:
+        payload["provider"] = provider
+
+    assert parse_account_health(json.dumps(payload)) == []
+
+
+def test_unavailable_health_is_scoped_by_provider_label_and_model():
+    engine = AutoSwitchEngine(priority=["personal", "company"])
+
+    decision = engine.on_unavailable(
+        provider="codex",
+        active="personal",
+        model="gpt-5.6-sol",
+        now=1.0,
+        health={
+            ("other-provider", "personal", "gpt-5.6-sol"): "entitlement_unavailable",
+        },
+    )
+
+    assert decision == Decision(kind="none", target=None, reason="")
+
+
 def test_unavailable_model_falls_back_to_next_configured_account():
     engine = AutoSwitchEngine(priority=["personal", "company"])
 
     decision = engine.on_unavailable(
+        provider="codex",
         active="personal",
         model="gpt-5.6-sol",
         now=1.0,
-        health={("personal", "gpt-5.6-sol"): "entitlement_unavailable"},
+        health={("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable"},
     )
 
     assert decision == Decision(
@@ -111,12 +147,13 @@ def test_unavailable_skips_successor_unavailable_for_the_same_model():
     engine = AutoSwitchEngine(priority=["personal", "company", "fallback"])
 
     decision = engine.on_unavailable(
+        provider="codex",
         active="personal",
         model="gpt-5.6-sol",
         now=1.0,
         health={
-            ("personal", "gpt-5.6-sol"): "entitlement_unavailable",
-            ("company", "gpt-5.6-sol"): "entitlement_unavailable",
+            ("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable",
+            ("codex", "company", "gpt-5.6-sol"): "entitlement_unavailable",
         },
     )
 
@@ -131,10 +168,11 @@ def test_unavailable_does_not_switch_for_ambiguous_model_input():
     engine = AutoSwitchEngine(priority=["personal", "company"])
 
     decision = engine.on_unavailable(
+        provider="codex",
         active="personal",
         model="",
         now=1.0,
-        health={("personal", ""): "entitlement_unavailable"},
+        health={("codex", "personal", ""): "entitlement_unavailable"},
     )
 
     assert decision == Decision(kind="none", target=None, reason="")
@@ -144,16 +182,18 @@ def test_unavailable_requires_entitlement_and_an_available_successor():
     engine = AutoSwitchEngine(priority=["personal", "company"])
 
     assert engine.on_unavailable(
+        provider="codex",
         active="personal",
         model="gpt-5.6-sol",
         now=1.0,
         health={},
     ) == Decision(kind="none", target=None, reason="")
     assert engine.on_unavailable(
+        provider="codex",
         active="company",
         model="gpt-5.6-sol",
         now=1.0,
-        health={("company", "gpt-5.6-sol"): "entitlement_unavailable"},
+        health={("codex", "company", "gpt-5.6-sol"): "entitlement_unavailable"},
     ) == Decision(kind="none", target=None, reason="")
 
 
@@ -162,10 +202,11 @@ def test_unavailable_respects_switch_cooldown():
     engine.note_switch(now=1.0)
 
     assert engine.on_unavailable(
+        provider="codex",
         active="personal",
         model="gpt-5.6-sol",
         now=2.0,
-        health={("personal", "gpt-5.6-sol"): "entitlement_unavailable"},
+        health={("codex", "personal", "gpt-5.6-sol"): "entitlement_unavailable"},
     ) == Decision(kind="none", target=None, reason="")
 
 
