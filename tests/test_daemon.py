@@ -383,10 +383,20 @@ def test_claude_whitelist_keys(claude_env):
 
 def test_claude_omitted_when_unknown(claude_env):
     d, store, io, sessions, claude_json, claude_creds = claude_env
-    claude_creds.unlink()
+    claude_json.unlink()          # config 부재 = 진짜 unknown (자격 파일 부재는 더 이상 아님)
     d.tick(now=0.0)
     state = json.loads(store.state_path.read_text())
     assert "claude" not in state["providers"]
+
+
+def test_claude_kept_when_only_credentials_missing(claude_env):
+    """macOS Keychain 설치에서는 자격 파일이 없다 — usage는 계속 기록돼야 한다."""
+    d, store, io, sessions, claude_json, claude_creds = claude_env
+    claude_creds.unlink()
+    d.tick(now=0.0)
+    claude = json.loads(store.state_path.read_text())["providers"]["claude"]
+    assert claude["usage"]["seven_day_pct"] == 12.0
+    assert claude["login_warning"] is None
 
 
 def test_claude_usage_null_when_pct_none(claude_env):

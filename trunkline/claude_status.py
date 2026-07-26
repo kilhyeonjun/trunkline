@@ -62,13 +62,16 @@ def _read_live(live_json: Path | None) -> dict | None:
 
 def read_claude_status(claude_json: Path, credentials_json: Path,
                         live_json: Path | None = LIVE_JSON_DEFAULT) -> ClaudeStatus:
+    # 자격 파일은 만료 경고 하나만 제공하는 부가 입력이다. macOS Claude Code는 OAuth를
+    # Keychain에 보관해 파일이 아예 없고, Keychain 읽기는 §1.1 grep 게이트로 금지돼 있다.
+    # 따라서 부재·손상·형식 불일치는 만료 미상으로 격하하고 usage 보고는 계속한다.
+    exp_ms = None
     try:
         creds = json.loads(credentials_json.read_text())
-    except OSError:
-        return _err("credentials_missing")
-    except ValueError:
-        return _err("parse_error")
-    exp_ms = _num((creds.get("claudeAiOauth") or {}).get("refreshTokenExpiresAt"))
+    except (OSError, ValueError):
+        creds = None
+    if isinstance(creds, dict):
+        exp_ms = _num((creds.get("claudeAiOauth") or {}).get("refreshTokenExpiresAt"))
     del creds  # 토큰 dict 즉시 폐기 (설계 §1.1)
 
     try:
