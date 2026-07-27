@@ -28,8 +28,28 @@ def test_utilization_null_gives_none_not_crash(tmp_path):
 def test_missing_files_enum_errors(tmp_path):
     st = read_claude_status(tmp_path / "no.json", _creds(tmp_path))
     assert (not st.ok) and st.error == "config_missing"
+
+
+def test_missing_credentials_still_reports_usage(tmp_path):
+    """자격 파일은 만료 경고용 부가 입력 — macOS는 Keychain에 보관해 파일이 없다.
+    부재가 usage 보고를 막으면 안 된다 (Keychain 읽기는 §1.1 grep 게이트로 금지)."""
     st = read_claude_status(_cfg(tmp_path), tmp_path / "no2.json")
-    assert (not st.ok) and st.error == "credentials_missing"
+    assert st.ok and st.error is None
+    assert st.email == "h@x.net" and st.five_hour_pct == 0.0 and st.seven_day_pct == 12.0
+    assert st.login_expires_at is None
+    assert login_warning(st, NOW) is None     # 만료 미상 → 늑대소년 금지
+
+
+def test_corrupt_credentials_still_reports_usage(tmp_path):
+    p = tmp_path / "creds-bad.json"; p.write_text("not json")
+    st = read_claude_status(_cfg(tmp_path), p)
+    assert st.ok and st.error is None and st.login_expires_at is None
+
+
+def test_non_dict_credentials_still_reports_usage(tmp_path):
+    p = tmp_path / "creds-list.json"; p.write_text("[1, 2]")
+    st = read_claude_status(_cfg(tmp_path), p)
+    assert st.ok and st.error is None and st.login_expires_at is None
 
 
 def test_cache_key_missing(tmp_path):
