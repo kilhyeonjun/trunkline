@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# 번들 버전은 Python 패키지 버전에서 파생한다. 하드코딩하면 릴리스마다 낡는다
+# (v0.1.0부터 v0.1.1까지 0.1.0으로 고정돼 있었다). 읽지 못하면 릴리스를 중단한다.
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' ../trunkline/__init__.py)"
+[ -n "$VERSION" ] || { echo "error: ../trunkline/__init__.py 에서 __version__ 을 읽지 못했다" >&2; exit 1; }
 swift build -c release
 APP=".build/Trunkline.app"
 rm -rf "$APP"
@@ -43,7 +47,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleName</key><string>Trunkline</string>
   <key>CFBundleExecutable</key><string>Trunkline</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
 $ICON_TAG

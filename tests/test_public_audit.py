@@ -1,3 +1,4 @@
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -49,33 +50,50 @@ def test_v010_release_docs_name_exact_asset_and_limits():
     assert "SHA-256" in notes
 
 
-def test_v011_release_metadata_and_docs_stay_consistent():
+def test_v012_release_metadata_and_docs_stay_consistent():
     root = Path(__file__).resolve().parents[1]
     project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
     init = (root / "trunkline/__init__.py").read_text()
     readme = (root / "README.md").read_text()
-    notes = (root / "docs/releases/v0.1.1.md").read_text()
-    asset = "trunkline-0.1.1-py3-none-any.whl"
+    notes = (root / "docs/releases/v0.1.2.md").read_text()
+    asset = "trunkline-0.1.2-py3-none-any.whl"
 
-    assert project["version"] == "0.1.1"
-    assert '__version__ = "0.1.1"' in init
-    assert asset in readme and "releases/download/v0.1.1" in readme
+    assert project["version"] == "0.1.2"
+    assert '__version__ = "0.1.2"' in init
+    assert asset in readme and "releases/download/v0.1.2" in readme
     assert asset in notes and "SHA-256" in notes
-    assert "health --probe" in notes and "rollback" in notes
+    assert "Keychain" in notes and "rollback" in notes
+    # 이 릴리스가 실제로 무엇을 고쳤는지 노트가 말하도록 고정
+    assert "credentials" in notes and "login_ok" in notes
 
 
-def test_v011_rollback_instructions_are_executable_and_verified():
+def test_app_bundle_version_is_derived_not_hardcoded():
+    """package_app.sh 가 번들 버전을 하드코딩하면 릴리스마다 낡는다 — v0.1.0부터
+    v0.1.1까지 실제로 0.1.0으로 고정돼 있었고 어떤 테스트도 잡지 못했다."""
     root = Path(__file__).resolve().parents[1]
-    notes = (root / "docs/releases/v0.1.1.md").read_text()
-    url = (
-        "https://github.com/kilhyeonjun/trunkline/releases/download/v0.1.0/"
-        "trunkline-0.1.0-py3-none-any.whl"
-    )
-    checksum = "8ea376582bd2e23e0cb1f98bbe831f15138c622cbb943ca8054699ed7cc86175"
+    script = (root / "menubar/Scripts/package_app.sh").read_text()
+    init = (root / "trunkline/__init__.py").read_text()
 
-    assert f"curl -fL -o trunkline-0.1.0-py3-none-any.whl {url}" in notes
-    assert f"echo '{checksum}  trunkline-0.1.0-py3-none-any.whl' | shasum -a 256 -c -" in notes
-    assert "pipx install --force trunkline-0.1.0-py3-none-any.whl" in notes
+    assert "<key>CFBundleShortVersionString</key><string>$VERSION</string>" in script
+    assert "trunkline/__init__.py" in script
+    assert not re.search(r"<string>\d+\.\d+\.\d+</string>", script)
+    # 파생 실패 시 조용히 잘못된 버전을 싣지 않고 중단해야 한다
+    assert 'exit 1' in script
+    assert re.search(r'^__version__ = "\d+\.\d+\.\d+"$', init, re.MULTILINE)
+
+
+def test_v012_rollback_instructions_are_executable_and_verified():
+    root = Path(__file__).resolve().parents[1]
+    notes = (root / "docs/releases/v0.1.2.md").read_text()
+    url = (
+        "https://github.com/kilhyeonjun/trunkline/releases/download/v0.1.1/"
+        "trunkline-0.1.1-py3-none-any.whl"
+    )
+    checksum = "73c8b6b34cde39463c63422a81a61ba61bf1d24d3a5997e4e2137b28b96c439d"
+
+    assert f"curl -fL -o trunkline-0.1.1-py3-none-any.whl {url}" in notes
+    assert f"echo '{checksum}  trunkline-0.1.1-py3-none-any.whl' | shasum -a 256 -c -" in notes
+    assert "pipx install --force trunkline-0.1.1-py3-none-any.whl" in notes
 
 
 def test_packaging_uses_current_spdx_license_metadata():
