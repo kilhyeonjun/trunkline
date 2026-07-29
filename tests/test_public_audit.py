@@ -50,21 +50,24 @@ def test_v010_release_docs_name_exact_asset_and_limits():
     assert "SHA-256" in notes
 
 
-def test_v012_release_metadata_and_docs_stay_consistent():
+def test_v013_release_metadata_and_docs_stay_consistent():
     root = Path(__file__).resolve().parents[1]
     project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
     init = (root / "trunkline/__init__.py").read_text()
     readme = (root / "README.md").read_text()
-    notes = (root / "docs/releases/v0.1.2.md").read_text()
-    asset = "trunkline-0.1.2-py3-none-any.whl"
+    workflow = (root / ".github/workflows/ci.yml").read_text()
+    notes = (root / "docs/releases/v0.1.3.md").read_text()
+    asset = "trunkline-0.1.3-py3-none-any.whl"
 
-    assert project["version"] == "0.1.2"
-    assert '__version__ = "0.1.2"' in init
-    assert asset in readme and "releases/download/v0.1.2" in readme
+    assert project["version"] == "0.1.3"
+    assert '__version__ = "0.1.3"' in init
+    assert asset in readme and "releases/download/v0.1.3" in readme
+    # CI가 검사하는 wheel 이름도 계약의 일부 — 낡으면 릴리스 잡이 없는 파일을 연다
+    assert f"dist/{asset}" in workflow
     assert asset in notes and "SHA-256" in notes
-    assert "Keychain" in notes and "rollback" in notes
+    assert "rollback" in notes
     # 이 릴리스가 실제로 무엇을 고쳤는지 노트가 말하도록 고정
-    assert "credentials" in notes and "login_ok" in notes
+    assert "usage HTTP 401" in notes and "cache_missing" in notes
 
 
 def test_app_bundle_version_is_derived_not_hardcoded():
@@ -82,18 +85,18 @@ def test_app_bundle_version_is_derived_not_hardcoded():
     assert re.search(r'^__version__ = "\d+\.\d+\.\d+"$', init, re.MULTILINE)
 
 
-def test_v012_rollback_instructions_are_executable_and_verified():
+def test_v013_rollback_instructions_are_executable_and_verified():
     root = Path(__file__).resolve().parents[1]
-    notes = (root / "docs/releases/v0.1.2.md").read_text()
+    notes = (root / "docs/releases/v0.1.3.md").read_text()
     url = (
-        "https://github.com/kilhyeonjun/trunkline/releases/download/v0.1.1/"
-        "trunkline-0.1.1-py3-none-any.whl"
+        "https://github.com/kilhyeonjun/trunkline/releases/download/v0.1.2/"
+        "trunkline-0.1.2-py3-none-any.whl"
     )
-    checksum = "73c8b6b34cde39463c63422a81a61ba61bf1d24d3a5997e4e2137b28b96c439d"
+    checksum = "676811f7ac1521848a53c5fd89a834b66ca7bc5489aa85ea7f4472cd45de0936"
 
-    assert f"curl -fL -o trunkline-0.1.1-py3-none-any.whl {url}" in notes
-    assert f"echo '{checksum}  trunkline-0.1.1-py3-none-any.whl' | shasum -a 256 -c -" in notes
-    assert "pipx install --force trunkline-0.1.1-py3-none-any.whl" in notes
+    assert f"curl -fL -o trunkline-0.1.2-py3-none-any.whl {url}" in notes
+    assert f"echo '{checksum}  trunkline-0.1.2-py3-none-any.whl' | shasum -a 256 -c -" in notes
+    assert "pipx install --force trunkline-0.1.2-py3-none-any.whl" in notes
 
 
 def test_packaging_uses_current_spdx_license_metadata():

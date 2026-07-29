@@ -24,15 +24,15 @@ Codex-first, with read-only Claude status display.
 
 ## Install the CLI
 
-Install the v0.1.2 wheel from GitHub Releases:
+Install the v0.1.3 wheel from GitHub Releases:
 
 ```bash
-pipx install https://github.com/kilhyeonjun/trunkline/releases/download/v0.1.2/trunkline-0.1.2-py3-none-any.whl
+pipx install https://github.com/kilhyeonjun/trunkline/releases/download/v0.1.3/trunkline-0.1.3-py3-none-any.whl
 trunkline --help
 ```
 
 Verify the downloaded wheel against the published
-`trunkline-0.1.2-py3-none-any.whl.sha256` file before installation when
+`trunkline-0.1.3-py3-none-any.whl.sha256` file before installation when
 downloading it manually.
 
 Initialize two named snapshots after backing up your current credentials:

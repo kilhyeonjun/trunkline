@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trunkline"
-version = "0.1.2"
+version = "0.1.3"
 description = "Local-first multi-account manager for AI coding tools"
 readme = "README.md"
 requires-python = ">=3.11"
