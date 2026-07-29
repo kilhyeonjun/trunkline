@@ -180,3 +180,34 @@ def test_live_extra_keys_ignored(tmp_path):
     st = read_claude_status(_cfg(tmp_path), _creds(tmp_path), live_json=live)
     assert st.email == "h@x.net"  # live email key ignored — login path untouched
     assert "leak@x.net" not in json.dumps(st.__dict__)
+
+
+def test_live_used_when_cache_key_absent(tmp_path):
+    """실측: Claude Code가 ~/.claude.json에 cachedUsageUtilization을 아예 안 쓴다.
+    statusline이 tee한 live가 신선한데 캐시 게이트가 먼저 cache_missing으로 끊으면
+    가진 데이터를 버린다."""
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"oauthAccount": {"emailAddress": "h@x.net",
+                                                "organizationRateLimitTier": "max_20x"}}))
+    st = read_claude_status(p, _creds(tmp_path), live_json=_live(tmp_path))
+    assert st.ok and st.error is None
+    assert st.five_hour_pct == 5.0 and st.seven_day_pct == 9.0
+    assert st.fetched_at == NOW
+    assert st.email == "h@x.net" and st.tier == "max_20x"
+
+
+def test_cache_and_live_both_absent_still_cache_missing(tmp_path):
+    p = tmp_path / "c.json"
+    p.write_text("{}")
+    st = read_claude_status(p, _creds(tmp_path), live_json=tmp_path / "no-live.json")
+    assert (not st.ok) and st.error == "cache_missing"
+
+
+def test_cache_absent_and_live_without_timestamp_is_cache_missing(tmp_path):
+    """at 없는 live는 신선도 비교가 불가 — ok(전부 None)로 승격하면 안 된다."""
+    p = tmp_path / "c.json"
+    p.write_text("{}")
+    live = tmp_path / "live.json"
+    live.write_text(json.dumps({"five_hour_pct": 5.0}))
+    st = read_claude_status(p, _creds(tmp_path), live_json=live)
+    assert (not st.ok) and st.error == "cache_missing"

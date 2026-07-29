@@ -80,10 +80,15 @@ def read_claude_status(claude_json: Path, credentials_json: Path,
         return _err("config_missing")
     except ValueError:
         return _err("parse_error")
+    # live는 캐시 게이트보다 먼저 읽는다: Claude Code가 cachedUsageUtilization을
+    # 아예 안 쓰는 버전이 있어, 캐시 부재로 조기 반환하면 statusline이 tee한
+    # 신선한 live를 통째로 버린다.
+    live = _read_live(live_json)
+    live_at = _num(live.get("at")) if live else None
     cache = cfg.get("cachedUsageUtilization") or {}
     util = cache.get("utilization") or {}
-    if not util:
-        return _err("cache_missing")
+    if not util and live_at is None:
+        return _err("cache_missing")   # at 없는 live는 신선도 비교 불가 → 캐시 부재와 동급
     acct = cfg.get("oauthAccount") or {}
     fh = util.get("five_hour") or {}
     sd = util.get("seven_day") or {}
@@ -94,8 +99,6 @@ def read_claude_status(claude_json: Path, credentials_json: Path,
     seven_day_pct = _num(sd.get("utilization"))
     seven_day_resets_at = _iso_to_epoch(sd.get("resets_at"))
 
-    live = _read_live(live_json)
-    live_at = _num(live.get("at")) if live else None
     if live_at is not None and (fetched_at is None or live_at > fetched_at):
         five_hour_pct = _num(live.get("five_hour_pct"))
         five_hour_resets_at = _num(live.get("five_hour_resets_at"))
