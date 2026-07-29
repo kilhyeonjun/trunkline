@@ -249,6 +249,8 @@ def test_usage_json_nested(env, monkeypatch, capsys):
 def test_usage_json_includes_plan_from_identity(env, monkeypatch, capsys):
     """계정별 auth.json의 chatgpt_plan_type → usage --json codex 행 plan (T6b)."""
     sb_root, codex_home = env
+    # personal은 활성(live=acct-p) → live에서, company는 비활성 → 스냅샷에서 읽힌다
+    (codex_home / "auth.json").write_bytes(_auth_with_plan("acct-p", "pro"))
     (codex_home / "accounts" / "personal" / "auth.json").write_bytes(_auth_with_plan("acct-p", "pro"))
     (codex_home / "accounts" / "company" / "auth.json").write_bytes(_auth_with_plan("acct-c", "plus"))
     cli.main(["init", "--priority", "personal,company"])
@@ -284,6 +286,7 @@ def test_usage_plan_none_when_identity_unreadable(env, monkeypatch, capsys):
 def test_usage_human_output_shows_plan(env, monkeypatch, capsys):
     """사람용 usage 출력 병기: `personal (pro): 7d 41%` 형태."""
     sb_root, codex_home = env
+    (codex_home / "auth.json").write_bytes(_auth_with_plan("acct-p", "pro"))   # personal = 활성
     (codex_home / "accounts" / "personal" / "auth.json").write_bytes(_auth_with_plan("acct-p", "pro"))
     cli.main(["init", "--priority", "personal,company"])
     from trunkline.usage import UsageRow
@@ -380,3 +383,53 @@ def test_health_probe_persists_one_normalized_active_account_event(env, monkeypa
         "state": "entitlement_unavailable", "observed_at": calls[0]["observed_at"],
         "reset_at": None, "error_class": "model_unsupported",
     }]
+
+
+def test_usage_reads_live_auth_for_active_account(env, monkeypatch, capsys):
+    """codex CLI는 live auth.json만 in-place 회전시킨다. 스냅샷 흡수(_save_back)는
+    switch 시점에만 일어나므로 lock 모드/단일 계정에서는 스냅샷 토큰이 무한히 낡고
+    usage가 HTTP 401을 받는다. 활성 계정은 live에서 읽어야 한다."""
+    sb_root, codex_home = env
+    (codex_home / "auth.json").write_bytes(_auth_with_plan("acct-p", "pro"))
+    (codex_home / "accounts" / "personal" / "auth.json").write_bytes(
+        _auth_with_plan("acct-p", "plus"))     # 낡은 스냅샷 — 플랜까지 과거값
+    cli.main(["init", "--priority", "personal,company"])
+    seen: dict[str, Path] = {}
+    from trunkline.usage import UsageRow
+
+    def fake_read_usage(label, path):
+        seen[label] = path
+        return UsageRow(label=label, ok=True, stale=False, primary_used=1.0,
+                        primary_reset=None, secondary_used=2.0, secondary_reset=None,
+                        error=None, primary_window_minutes=10080,
+                        secondary_window_minutes=300)
+
+    monkeypatch.setattr(cli, "read_usage", fake_read_usage)
+    monkeypatch.setattr(cli, "read_claude_status", lambda *_: _claude_ok())
+    capsys.readouterr()
+    assert cli.main(["usage"]) == 0
+    assert seen["personal"] == codex_home / "auth.json"
+    assert seen["company"] == codex_home / "accounts" / "company" / "auth.json"
+    # 플랜 라벨도 같은 경로에서 — 활성 계정은 live 기준
+    assert "personal (pro):" in capsys.readouterr().out
+
+
+def test_usage_falls_back_to_snapshot_when_live_unmatched(env, monkeypatch, capsys):
+    """live 신원이 어느 스냅샷과도 안 맞으면(로그아웃/타계정) 추측 금지 — 전부 스냅샷."""
+    sb_root, codex_home = env
+    (codex_home / "auth.json").write_bytes(_auth("acct-unknown"))
+    cli.main(["init", "--priority", "personal,company"])
+    seen: dict[str, Path] = {}
+    from trunkline.usage import UsageRow
+
+    def fake_read_usage(label, path):
+        seen[label] = path
+        return UsageRow(label=label, ok=True, stale=False, primary_used=1.0,
+                        primary_reset=None, secondary_used=2.0, secondary_reset=None,
+                        error=None)
+
+    monkeypatch.setattr(cli, "read_usage", fake_read_usage)
+    monkeypatch.setattr(cli, "read_claude_status", lambda *_: _claude_ok())
+    assert cli.main(["usage"]) == 0
+    assert seen["personal"] == codex_home / "accounts" / "personal" / "auth.json"
+    assert seen["company"] == codex_home / "accounts" / "company" / "auth.json"
