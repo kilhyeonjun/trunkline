@@ -162,13 +162,24 @@ def _account_plan(secret_path: Path) -> str | None:
     return ident.plan if ident else None
 
 
+def _auth_path(store, io, sw, account: Account) -> Path:
+    """활성 계정은 스냅샷이 아니라 live auth를 읽는다. codex CLI는 live만 in-place
+    회전시키고 스냅샷 흡수는 switch 시점에만 일어나므로, lock 모드에서는 스냅샷
+    토큰이 무한히 낡아 usage가 HTTP 401을 받는다. 활성 판정은 store 기록이 아니라
+    live 신원 매칭(current_label) — 신원 불일치 시 추측 금지하고 스냅샷으로 폴백."""
+    if sw.current_label(account.provider) == account.label:
+        return io.live_path
+    return store.secret_path(account)
+
+
 def _cmd_usage(args) -> int:
     import json as _json
     from dataclasses import asdict, replace
-    store, _, _ = _wiring()
+    store, io, sw = _wiring()
     data = store.load()
-    rows = [replace(read_usage(a.label, store.secret_path(a)),
-                     plan=_account_plan(store.secret_path(a)))
+    paths = {a.label: _auth_path(store, io, sw, a) for a in store.labels(data, PROVIDER)}
+    rows = [replace(read_usage(a.label, paths[a.label]),
+                     plan=_account_plan(paths[a.label]))
             for a in store.labels(data, PROVIDER)]
     st = read_claude_status(CLAUDE_JSON, CLAUDE_CREDS, LIVE_JSON_DEFAULT)
     if getattr(args, "json", False):
